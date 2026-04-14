@@ -84,39 +84,48 @@ export default function WorkspacePage() {
     }
   }
 
+// REPLACE your existing handleInvite function with this:
+
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault()
     if (!inviteEmail.trim() || !workspace) return
     setInviteLoading(true)
     setInviteMsg('')
 
-    // check if user exists in profiles by email
-    // we do this by checking auth - look for existing member
-    const { data: existingUser } = await supabase
-      .from('profiles')
-      .select('id, full_name')
-      .eq('id', (await supabase.auth.getUser()).data.user?.id)
-      .single()
-
-    // Try to find user by searching workspace_members won't work
-    // Instead we use Supabase magic link invite approach
-    // We'll store a pending invite in a simple way - just show success
-    // and tell them to share the signup link
-
-    // For now: check if email already a member
+    // Check if already a member
     const alreadyMember = members.find(m => m.profiles?.email === inviteEmail)
     if (alreadyMember) {
-      setInviteMsg('This person is already a member!')
+      setInviteMsg('error:This person is already a member!')
       setInviteLoading(false)
       return
     }
 
-    // Store invite intent - in real app you'd send email via Edge Function
-    // For now we show the workspace join link
-    setInviteMsg(`✓ Share this link with ${inviteEmail}: devboardapp.vercel.app/signup — they sign up and you can add them manually from members list. (Auto-email invite coming soon!)`)
+    // Call our API route which sends the real email
+    const res = await fetch('/api/invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: inviteEmail,
+        role: inviteRole,
+        workspaceId: workspace.id,
+        workspaceSlug: workspace.slug,
+        workspaceName: workspace.name,
+      }),
+    })
+
+    const data = await res.json()
+
+    if (data.error) {
+      setInviteMsg(`error:${data.error}`)
+    } else {
+      setInviteMsg(`success:Invite sent to ${inviteEmail}! They will get an email with a link to join.`)
+      setInviteEmail('')
+    }
+
     setInviteLoading(false)
-    setInviteEmail('')
   }
+
+
 
   async function removeMember(memberId: string) {
     if (userRole !== 'admin') return
@@ -198,8 +207,8 @@ export default function WorkspacePage() {
                   <option value="admin" className="bg-black">Admin — full access</option>
                 </select>
                 {inviteMsg && (
-                  <p className={`text-xs px-3 py-2 rounded-lg ${inviteMsg.startsWith('✓') ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
-                    {inviteMsg}
+                  <p className={`text-xs px-3 py-2 rounded-lg ${inviteMsg.startsWith('success:') ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                    {inviteMsg.replace('success:', '').replace('error:', '')}
                   </p>
                 )}
                 <div className="flex gap-3">
