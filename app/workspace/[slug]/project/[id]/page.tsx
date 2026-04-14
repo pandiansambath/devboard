@@ -21,6 +21,7 @@ export default function ProjectPage() {
   const [selectedTask, setSelectedTask] = useState<any>(null)
   const [comments, setComments] = useState<any[]>([])
   const [newComment, setNewComment] = useState('')
+  const [replyTo, setReplyTo] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [dragging, setDragging] = useState<any>(null)
   const [overCol, setOverCol] = useState<string | null>(null)
@@ -129,7 +130,8 @@ export default function ProjectPage() {
     if (!newComment.trim() || !user || !selectedTask) return
     const body = newComment.trim()
     setNewComment('')
-    await supabase.from('comments').insert({ task_id: selectedTask.id, user_id: user.id, body })
+    setReplyTo(null)
+    await supabase.from('comments').insert({ task_id: selectedTask.id, user_id: user.id, body, parent_id: replyTo || null })
     logActivity(`commented on "${selectedTask.title}"`, 'comment', selectedTask.id)
     loadComments(selectedTask.id)
   }
@@ -143,7 +145,6 @@ export default function ProjectPage() {
   function onDragStart(e: React.DragEvent, task: any) {
     setDragging(task)
     e.dataTransfer.effectAllowed = 'move'
-    // make ghost image nice
     const ghost = document.createElement('div')
     ghost.textContent = task.title
     ghost.style.cssText = 'position:fixed;top:-100px;background:#1a1a1a;color:white;padding:12px 16px;border-radius:12px;font-size:14px;border:1px solid rgba(255,255,255,0.2);max-width:200px;'
@@ -350,26 +351,80 @@ export default function ProjectPage() {
                   <p className="text-white/15 text-sm">No comments yet.</p>
                 ) : (
                   <div className="flex flex-col gap-5">
-                    {comments.map((c, i) => (
-                      <motion.div key={c.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} className="flex gap-3">
-                        <div className="w-7 h-7 bg-white/8 rounded-full flex items-center justify-center text-xs flex-shrink-0 font-medium border border-white/10">
-                          {(c.profiles?.full_name || 'U')[0].toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="text-xs text-white/25 mb-1">{c.profiles?.full_name}</p>
-                          <p className="text-sm text-white/65 leading-relaxed">{c.body}</p>
-                        </div>
-                      </motion.div>
-                    ))}
+                    {comments
+                      .filter(c => !c.parent_id)
+                      .map((c, i) => {
+                        const replies = comments.filter(r => r.parent_id === c.id)
+
+                        return (
+                          <div key={c.id} className="flex flex-col gap-2">
+
+                            {/* Parent comment */}
+                            <motion.div
+                              initial={{ opacity: 0, y: 8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: i * 0.04 }}
+                              className="flex gap-3 items-start"
+                            >
+                              <div className="w-7 h-7 bg-white/8 rounded-full flex items-center justify-center text-xs flex-shrink-0 font-medium border border-white/10">
+                                {(c.profiles?.full_name || 'U')[0].toUpperCase()}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-white/25 mb-1">{c.profiles?.full_name}</p>
+                                <p className="text-sm text-white/65 leading-relaxed">{c.body}</p>
+                                <button
+                                  onClick={() => setReplyTo(replyTo === c.id ? null : c.id)}
+                                  className={`text-xs mt-1 transition ${replyTo === c.id ? 'text-white/60' : 'text-white/30 hover:text-white/60'}`}
+                                >
+                                  {replyTo === c.id ? '↩ Cancel reply' : 'Reply'}
+                                </button>
+                              </div>
+                            </motion.div>
+
+                            {/* Replies */}
+                            {replies.length > 0 && (
+                              <div className="flex flex-col gap-3 ml-10 pl-3 border-l border-white/8">
+                                {replies.map(r => (
+                                  <motion.div
+                                    key={r.id}
+                                    initial={{ opacity: 0, x: 10 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    className="flex gap-3 items-start"
+                                  >
+                                    <div className="w-6 h-6 bg-white/5 rounded-full flex items-center justify-center text-xs border border-white/10 flex-shrink-0">
+                                      {(r.profiles?.full_name || 'U')[0].toUpperCase()}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-xs text-white/25 mb-1">{r.profiles?.full_name}</p>
+                                      <p className="text-xs text-white/60 leading-relaxed">{r.body}</p>
+                                    </div>
+                                  </motion.div>
+                                ))}
+                              </div>
+                            )}
+
+                          </div>
+                        )
+                      })}
                   </div>
                 )}
               </div>
 
               <div className="p-5 border-t border-white/8">
+                {replyTo && (
+                  <div className="flex items-center justify-between mb-2 px-1">
+                    <p className="text-xs text-white/30">
+                      Replying to comment
+                    </p>
+                    <button onClick={() => setReplyTo(null)} className="text-xs text-white/20 hover:text-white/50 transition">
+                      Cancel
+                    </button>
+                  </div>
+                )}
                 <form onSubmit={addComment} className="flex gap-3">
                   <input
                     value={newComment} onChange={e => setNewComment(e.target.value)}
-                    placeholder="Add a comment..."
+                    placeholder={replyTo ? 'Write a reply...' : 'Add a comment...'}
                     className="flex-1 bg-white/4 border border-white/8 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-white/20 transition placeholder:text-white/15"
                   />
                   <button type="submit" disabled={!newComment.trim()} className="bg-white text-black px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-white/90 transition disabled:opacity-20">
