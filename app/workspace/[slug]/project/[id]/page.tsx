@@ -22,6 +22,7 @@ export default function ProjectPage() {
   const [comments, setComments] = useState<any[]>([])
   const [newComment, setNewComment] = useState('')
   const [replyTo, setReplyTo] = useState<string | null>(null)
+  const [showEmojiFor, setShowEmojiFor] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [dragging, setDragging] = useState<any>(null)
   const [overCol, setOverCol] = useState<string | null>(null)
@@ -50,6 +51,23 @@ export default function ProjectPage() {
       })
       .subscribe()
 
+    const commentChannel = supabase.channel('comments-rt')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'comments'
+        },
+        () => {
+          if (selectedTask) {
+            loadComments(selectedTask.id)
+          }
+        }
+      )
+      .subscribe()
+
+
     const onMouseMove = (e: MouseEvent) => {
       if (cursorEl.current) cursorEl.current.style.transform = `translate(${e.clientX - 16}px,${e.clientY - 16}px)`
       if (cursorDot.current) cursorDot.current.style.transform = `translate(${e.clientX - 3}px,${e.clientY - 3}px)`
@@ -58,6 +76,7 @@ export default function ProjectPage() {
 
     return () => {
       supabase.removeChannel(actChannel)
+      supabase.removeChannel(commentChannel) 
       window.removeEventListener('mousemove', onMouseMove)
     }
   }, [projectId])
@@ -83,7 +102,15 @@ export default function ProjectPage() {
   }
 
   async function loadComments(taskId: string) {
-    const { data } = await supabase.from('comments').select('*, profiles(full_name)').eq('task_id', taskId).order('created_at')
+    const { data } = await supabase
+      .from('comments')
+      .select(`
+        *,
+        profiles(full_name),
+        comment_reactions(emoji, user_id)
+      `)
+      .eq('task_id', taskId)
+      .order('created_at')
     if (data) setComments(data)
   }
 
@@ -129,10 +156,49 @@ export default function ProjectPage() {
     e.preventDefault()
     if (!newComment.trim() || !user || !selectedTask) return
     const body = newComment.trim()
+    const currentReplyTo = replyTo
     setNewComment('')
     setReplyTo(null)
-    await supabase.from('comments').insert({ task_id: selectedTask.id, user_id: user.id, body, parent_id: replyTo || null })
+
+    await supabase.from('comments').insert({
+      task_id: selectedTask.id,
+      user_id: user.id,
+      body,
+      parent_id: currentReplyTo || null
+    })
     logActivity(`commented on "${selectedTask.title}"`, 'comment', selectedTask.id)
+    loadComments(selectedTask.id)
+  }
+
+  async function addReaction(commentId: string, emoji: string) {
+    if (!user) return
+
+    // check existing
+    const { data: existing } = await supabase
+      .from('comment_reactions')
+      .select('id')
+      .eq('comment_id', commentId)
+      .eq('user_id', user.id)
+      .eq('emoji', emoji)
+      .single()
+
+    if (existing) {
+      // ❌ remove if already reacted
+      await supabase
+        .from('comment_reactions')
+        .delete()
+        .eq('id', existing.id)
+    } else {
+      // ✅ add new reaction
+      await supabase
+        .from('comment_reactions')
+        .insert({
+          comment_id: commentId,
+          user_id: user.id,
+          emoji
+        })
+    }
+
     loadComments(selectedTask.id)
   }
 
@@ -140,6 +206,7 @@ export default function ProjectPage() {
     setSelectedTask(task)
     loadComments(task.id)
   }
+  const replyingUser = comments.find(c => c.id === replyTo)
 
   // drag handlers using HTML5 drag API
   function onDragStart(e: React.DragEvent, task: any) {
@@ -372,6 +439,51 @@ export default function ProjectPage() {
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs text-white/25 mb-1">{c.profiles?.full_name}</p>
                                 <p className="text-sm text-white/65 leading-relaxed">{c.body}</p>
+                                <div className="flex gap-2 mt-2 flex-wrap">
+                                  {(Object.entries(
+                                    (c.comment_reactions || []).reduce((acc: Record<string, number>, r: any) => {
+                                      acc[r.emoji] = (acc[r.emoji] || 0) + 1
+                                      return acc
+                                    }, {})
+                                  ) as [string, number][])
+                                    .map(([emoji, count]) => (
+                                      <button
+                                        key={emoji}
+                                        onClick={() => addReaction(c.id, emoji)}
+                                        className="text-xs px-2 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10"
+                                      >
+                                        {emoji} {count}
+                                      </button>
+                                    ))}
+
+                                  {/* Add new reaction */}
+                                  {/* Emoji picker */}
+                                  <div className="relative">
+                                    <button
+                                      onClick={() => setShowEmojiFor(showEmojiFor === c.id ? null : c.id)}
+                                      className="text-xs text-white/30 hover:text-white"
+                                    >
+                                      + 😊
+                                    </button>
+
+                                    {showEmojiFor === c.id && (
+                                      <div className="absolute z-10 mt-2 flex gap-2 bg-[#111] border border-white/10 rounded-lg p-2 shadow-lg">
+                                        {['👍', '❤️', '😂', '🔥', '🎉'].map(e => (
+                                          <button
+                                            key={e}
+                                            onClick={() => {
+                                              addReaction(c.id, e)
+                                              setShowEmojiFor(null)
+                                            }}
+                                            className="hover:scale-125 transition"
+                                          >
+                                            {e}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
                                 <button
                                   onClick={() => setReplyTo(replyTo === c.id ? null : c.id)}
                                   className={`text-xs mt-1 transition ${replyTo === c.id ? 'text-white/60' : 'text-white/30 hover:text-white/60'}`}
@@ -414,7 +526,7 @@ export default function ProjectPage() {
                 {replyTo && (
                   <div className="flex items-center justify-between mb-2 px-1">
                     <p className="text-xs text-white/30">
-                      Replying to comment
+                      Replying to {replyingUser?.profiles?.full_name || 'user'}
                     </p>
                     <button onClick={() => setReplyTo(null)} className="text-xs text-white/20 hover:text-white/50 transition">
                       Cancel
