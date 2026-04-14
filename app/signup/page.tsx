@@ -83,8 +83,13 @@ export default function SignupPage() {
                 provider: 'google',
               })
             }}
-            className="w-full bg-white text-black py-3 rounded-xl text-sm font-semibold hover:bg-white/90 transition mb-4"
+            className="w-full flex items-center justify-center gap-3 bg-white text-black py-3 rounded-xl text-sm font-semibold hover:bg-white/90 transition mb-4"
           >
+            <img
+              src="https://www.svgrepo.com/show/475656/google-color.svg"
+              alt="Google"
+              className="w-5 h-5"
+            />
             Continue with Google
           </button>
           <form onSubmit={handleSignup} className="flex flex-col gap-4">
