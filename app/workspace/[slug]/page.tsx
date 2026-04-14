@@ -129,7 +129,7 @@ export default function WorkspacePage() {
           <div className="border border-white/10 rounded-2xl p-16 text-center">
             <div className="text-4xl mb-4">📋</div>
             <h2 className="text-xl font-semibold mb-2">No projects yet</h2>
-            <p className="text-white/40 text-sm mb-6">Create your first project to start managing tasks</p>
+            <p className="text-white/40 text-sm mb-6">Create your first project to start managing tasks!</p>
             <button
               onClick={() => setShowNew(true)}
               className="bg-white text-black px-6 py-2.5 rounded-xl text-sm font-semibold hover:bg-white/90 transition"
