@@ -74,7 +74,7 @@ export async function POST(request: Request) {
 
     // Send confirmation email via Resend
     await resend.emails.send({
-      from: 'DevBoard <noreply@devboardapp.vercel.app>',
+      from: 'DevBoard <onboarding@resend.dev>',
       to: email,
       subject: `You've been added to "${workspaceName}" on DevBoard`,
       html: `
@@ -108,7 +108,7 @@ export async function POST(request: Request) {
   const inviteLink = `${appUrl}/signup?workspaceId=${workspaceId}&workspaceSlug=${workspaceSlug}`
 
   const { error: emailError } = await resend.emails.send({
-    from: 'DevBoard <noreply@devboardapp.vercel.app>',
+    from: 'DevBoard <onboarding@resend.dev>',
     to: email,
     subject: `You're invited to join "${workspaceName}" on DevBoard`,
     html: `
