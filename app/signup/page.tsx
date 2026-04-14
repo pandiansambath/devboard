@@ -77,6 +77,16 @@ export default function SignupPage() {
         <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
           <h1 className="text-2xl font-bold mb-1">Create account</h1>
           <p className="text-white/40 text-sm mb-8">Start collaborating with your team</p>
+          <button
+            onClick={async () => {
+              await supabase.auth.signInWithOAuth({
+                provider: 'google',
+              })
+            }}
+            className="w-full bg-white text-black py-3 rounded-xl text-sm font-semibold hover:bg-white/90 transition mb-4"
+          >
+            Continue with Google
+          </button>
           <form onSubmit={handleSignup} className="flex flex-col gap-4">
             <input
               type="text" placeholder="Full name" value={name}
