@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useRouter, useParams } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -15,10 +15,18 @@ export default function WorkspacePage() {
   const [showMembers, setShowMembers] = useState(false)
   const [projectName, setProjectName] = useState('')
   const [projectDesc, setProjectDesc] = useState('')
-  const [inviteEmail, setInviteEmail] = useState('')
+
+  // Invite state
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<any[]>([])
+  const [selectedUser, setSelectedUser] = useState<any>(null)  // existing user picked from dropdown
+  const [inviteEmail, setInviteEmail] = useState('')            // fallback manual email
   const [inviteRole, setInviteRole] = useState('member')
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteMsg, setInviteMsg] = useState('')
+  const [searchLoading, setSearchLoading] = useState(false)
+  const searchTimeout = useRef<any>(null)
+
   const [loading, setLoading] = useState(true)
   const [userRole, setUserRole] = useState('')
   const router = useRouter()
@@ -52,7 +60,7 @@ export default function WorkspacePage() {
 
     const { data: mems } = await supabase
       .from('workspace_members')
-      .select('*, profiles(full_name, avatar_url)')
+      .select('*, profiles(full_name, avatar_url, email)')
       .eq('workspace_id', ws.id)
     if (mems) {
       setMembers(mems)
@@ -61,6 +69,72 @@ export default function WorkspacePage() {
     }
 
     setLoading(false)
+  }
+
+  // Search users as they type
+  function handleSearchChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value
+    setSearchQuery(val)
+    setSelectedUser(null)
+    setInviteEmail(val) // fallback: treat as email if no user selected
+
+    if (searchTimeout.current) clearTimeout(searchTimeout.current)
+    if (val.length < 2) { setSearchResults([]); return }
+
+    setSearchLoading(true)
+    searchTimeout.current = setTimeout(async () => {
+      const res = await fetch(`/api/invite?query=${encodeURIComponent(val)}&workspaceId=${workspace?.id}`)
+      const data = await res.json()
+      setSearchResults(data.users || [])
+      setSearchLoading(false)
+    }, 300)
+  }
+
+  function selectUser(u: any) {
+    setSelectedUser(u)
+    setSearchQuery(u.full_name || u.email)
+    setInviteEmail(u.email)
+    setSearchResults([])
+  }
+
+  async function handleInvite(e: React.FormEvent) {
+    e.preventDefault()
+    if (!workspace) return
+    const emailToInvite = selectedUser?.email || inviteEmail.trim()
+    if (!emailToInvite) return
+
+    setInviteLoading(true)
+    setInviteMsg('')
+
+    const res = await fetch('/api/invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: emailToInvite,
+        role: inviteRole,
+        workspaceId: workspace.id,
+        workspaceSlug: workspace.slug,
+        workspaceName: workspace.name,
+        existingUserId: selectedUser?.id || null,
+      }),
+    })
+
+    const data = await res.json()
+
+    if (data.error) {
+      setInviteMsg(`error:${data.error}`)
+    } else if (data.type === 'added') {
+      setInviteMsg(`success:${selectedUser?.full_name || emailToInvite} has been added to the workspace and notified by email!`)
+      // Reload members list
+      loadWorkspace(user.id)
+    } else {
+      setInviteMsg(`success:Invite email sent to ${emailToInvite}! They'll get a link to join.`)
+    }
+
+    setSearchQuery('')
+    setSelectedUser(null)
+    setInviteEmail('')
+    setInviteLoading(false)
   }
 
   async function handleLogout() {
@@ -83,49 +157,6 @@ export default function WorkspacePage() {
       setShowNew(false)
     }
   }
-
-// REPLACE your existing handleInvite function with this:
-
-  async function handleInvite(e: React.FormEvent) {
-    e.preventDefault()
-    if (!inviteEmail.trim() || !workspace) return
-    setInviteLoading(true)
-    setInviteMsg('')
-
-    // Check if already a member
-    const alreadyMember = members.find(m => m.profiles?.email === inviteEmail)
-    if (alreadyMember) {
-      setInviteMsg('error:This person is already a member!')
-      setInviteLoading(false)
-      return
-    }
-
-    // Call our API route which sends the real email
-    const res = await fetch('/api/invite', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: inviteEmail,
-        role: inviteRole,
-        workspaceId: workspace.id,
-        workspaceSlug: workspace.slug,
-        workspaceName: workspace.name,
-      }),
-    })
-
-    const data = await res.json()
-
-    if (data.error) {
-      setInviteMsg(`error:${data.error}`)
-    } else {
-      setInviteMsg(`success:Invite sent to ${inviteEmail}! They will get an email with a link to join.`)
-      setInviteEmail('')
-    }
-
-    setInviteLoading(false)
-  }
-
-
 
   async function removeMember(memberId: string) {
     if (userRole !== 'admin') return
@@ -164,7 +195,7 @@ export default function WorkspacePage() {
           </button>
           {userRole === 'admin' && (
             <button
-              onClick={() => { setShowInvite(!showInvite); setShowMembers(false) }}
+              onClick={() => { setShowInvite(!showInvite); setShowMembers(false); setInviteMsg('') }}
               className="text-sm bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition"
             >
               + Invite
@@ -179,7 +210,7 @@ export default function WorkspacePage() {
 
       <div className="relative z-10 max-w-5xl mx-auto px-8 py-12">
 
-        {/* invite panel */}
+        {/* Smart Invite Panel */}
         <AnimatePresence>
           {showInvite && (
             <motion.div
@@ -189,14 +220,60 @@ export default function WorkspacePage() {
               className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6"
             >
               <h3 className="font-semibold mb-1">Invite to workspace</h3>
-              <p className="text-white/30 text-xs mb-4">Invite someone to join {workspace?.name}</p>
+              <p className="text-white/30 text-xs mb-4">Search by name or email. Existing users are added instantly.</p>
               <form onSubmit={handleInvite} className="flex flex-col gap-3">
-                <input
-                  type="email" placeholder="Email address" value={inviteEmail}
-                  onChange={e => setInviteEmail(e.target.value)}
-                  className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-white/30 transition placeholder:text-white/30"
-                  required
-                />
+
+                {/* Search input with dropdown */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search by name or email..."
+                    value={searchQuery}
+                    onChange={handleSearchChange}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-white/30 transition placeholder:text-white/30"
+                    autoComplete="off"
+                  />
+
+                  {/* Selected user badge */}
+                  {selectedUser && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-green-500/20 text-green-400 text-xs px-2 py-0.5 rounded-full">
+                      ✓ Existing user
+                    </div>
+                  )}
+
+                  {/* Search results dropdown */}
+                  {(searchResults.length > 0 || searchLoading) && !selectedUser && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-[#111] border border-white/10 rounded-xl overflow-hidden z-50 shadow-xl">
+                      {searchLoading ? (
+                        <div className="px-4 py-3 text-white/30 text-sm">Searching...</div>
+                      ) : (
+                        searchResults.map(u => (
+                          <button
+                            key={u.id}
+                            type="button"
+                            onClick={() => selectUser(u)}
+                            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition text-left"
+                          >
+                            <div className="w-8 h-8 bg-white/10 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0">
+                              {(u.full_name || u.email || 'U')[0].toUpperCase()}
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium">{u.full_name || '—'}</p>
+                              <p className="text-xs text-white/40">{u.email}</p>
+                            </div>
+                            <span className="ml-auto text-xs text-green-400/60">Add directly</span>
+                          </button>
+                        ))
+                      )}
+                      {!searchLoading && searchResults.length === 0 && (
+                        <div className="px-4 py-3 text-white/30 text-sm">
+                          No existing users found — will send invite email
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <select
                   value={inviteRole}
                   onChange={e => setInviteRole(e.target.value)}
@@ -206,16 +283,26 @@ export default function WorkspacePage() {
                   <option value="viewer" className="bg-black">Viewer — read only</option>
                   <option value="admin" className="bg-black">Admin — full access</option>
                 </select>
+
                 {inviteMsg && (
                   <p className={`text-xs px-3 py-2 rounded-lg ${inviteMsg.startsWith('success:') ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
                     {inviteMsg.replace('success:', '').replace('error:', '')}
                   </p>
                 )}
+
                 <div className="flex gap-3">
-                  <button type="submit" disabled={inviteLoading} className="bg-white text-black px-4 py-2 rounded-xl text-sm font-semibold hover:bg-white/90 transition disabled:opacity-40">
-                    {inviteLoading ? 'Sending...' : 'Send invite'}
+                  <button
+                    type="submit"
+                    disabled={inviteLoading || (!searchQuery.trim())}
+                    className="bg-white text-black px-4 py-2 rounded-xl text-sm font-semibold hover:bg-white/90 transition disabled:opacity-40"
+                  >
+                    {inviteLoading ? 'Sending...' : selectedUser ? 'Add to workspace' : 'Send invite email'}
                   </button>
-                  <button type="button" onClick={() => { setShowInvite(false); setInviteMsg('') }} className="text-white/40 hover:text-white text-sm transition px-4 py-2">
+                  <button
+                    type="button"
+                    onClick={() => { setShowInvite(false); setInviteMsg(''); setSearchQuery(''); setSelectedUser(null); setSearchResults([]) }}
+                    className="text-white/40 hover:text-white text-sm transition px-4 py-2"
+                  >
                     Cancel
                   </button>
                 </div>
@@ -224,7 +311,7 @@ export default function WorkspacePage() {
           )}
         </AnimatePresence>
 
-        {/* members panel */}
+        {/* Members panel */}
         <AnimatePresence>
           {showMembers && (
             <motion.div
