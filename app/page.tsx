@@ -72,7 +72,7 @@ export default function Home() {
         >
           Ship faster,
           <br />
-          <span className="text-white/30">together!</span>
+          <span className="text-white/30">together.</span>
         </motion.h1>
 
         <motion.p
